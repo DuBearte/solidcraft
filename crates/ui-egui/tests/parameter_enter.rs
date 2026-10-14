@@ -106,3 +106,16 @@ fn parameter_enter_comment_uses_selected_unit_and_unrelated_focus_does_not_submi
     assert!(result["parameters"].as_array().unwrap().iter().any(|p| p["name"] == "length" && p["unit"] == "cm" && p["comment"] == "Overall length"));
     assert_eq!(h.app.session.undo.len(), undo + 1);
 }
+#[test]
+fn parameter_add_resets_expression_for_next_row() {
+    let mut h = open();
+    let initial = h.app.params.as_ref().unwrap().new_expr.clone();
+    fill(&mut h, "name", "width");
+    fill(&mut h, "expression", "25 mm");
+    enter(&mut h, false);
+    let result = h.app.session.execute("parameters.list", &json!({})).unwrap();
+    assert!(result["parameters"].as_array().unwrap().iter().any(|p| p["name"] == "width" && p["expression"] == "25 mm"));
+    let d = h.app.params.as_ref().unwrap();
+    assert!(d.new_name.is_empty());
+    assert_eq!(d.new_expr, initial);
+}
