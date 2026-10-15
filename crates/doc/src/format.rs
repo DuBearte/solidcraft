@@ -222,6 +222,10 @@
 //!   parameters); the source's `at`, `height` and `angle` then hold the numbers they last came
 //!   to. A text without `exprs` is set as it always was; 0.12.0 asks for an update instead of
 //!   dropping the expressions and keeping the text at its last numbers.
+//!   Also under 22, a sketch line can be `infinite` (#1359): construction geometry through its
+//!   two points, drawn across the whole view, a boundary for trim and extend along its whole
+//!   line. Saved only when set; a line without it is the line it always was. 0.12.0 asks for an
+//!   update instead of drawing such a line between its two points.
 
 use serde_json::Value;
 
