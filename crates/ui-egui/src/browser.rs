@@ -42,6 +42,9 @@ pub fn drawn_occurrences() -> Vec<(Vec<u64>, String, Rect, bool)> {
 /// Browser state kept between frames.
 #[derive(Default)]
 pub struct TreeState {
+    /// The browser's search text (#1413): while it isn't empty, only bodies, sketches and
+    /// construction items whose names contain it are listed, in folders opened to show them.
+    pub search: String,
     /// Folders closed by the user (keys like `c0/bodies`).
     pub collapsed: BTreeSet<String>,
     /// Folders opened by the user (folders that start closed).
@@ -456,6 +459,30 @@ fn sel_of_key(k: &str) -> Option<Sel> {
     None
 }
 
+/// The browser's search text, lower-cased, while there is one.
+fn searching(app: &SolveApp) -> Option<String> {
+    let s = app.tree.search.trim();
+    (!s.is_empty()).then(|| s.to_lowercase())
+}
+
+/// The search box above the browser's rows, with a button that clears it.
+fn search_box(app: &mut SolveApp, ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        let clear = !app.tree.search.is_empty();
+        let width = ui.available_width() - if clear { 24.0 } else { 0.0 };
+        let edit = egui::TextEdit::singleline(&mut app.tree.search).hint_text(crate::i18n::tr_label("Search")).desired_width(width);
+        let resp = ui.add(edit);
+        crate::scenario::publish_handle("browser:search", resp.rect.center());
+        if resp.has_focus() && ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            app.tree.search.clear();
+        }
+        if clear && ui.small_button("×").on_hover_text(crate::i18n::tr_label("Clear the search")).clicked() {
+            app.tree.search.clear();
+        }
+    });
+    ui.add_space(4.0);
+}
+
 pub(crate) fn is_open(app: &SolveApp, key: &str, default: bool) -> bool {
     if default { !app.tree.collapsed.contains(key) } else { app.tree.expanded.contains(key) }
 }
@@ -548,6 +575,7 @@ fn browser_contents(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
 }
 
 fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
+    search_box(app, ui);
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: true, mouse_wheel: true, ..egui::scroll_area::ScrollSource::NONE })
@@ -585,7 +613,7 @@ fn component_name(app: &SolveApp, id: u64) -> String {
 fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, acts: &mut Actions) {
     let t = Tokens::get();
     let key = format!("c{id}");
-    let open = is_open(app, &key, true);
+    let open = is_open(app, &key, true) || searching(app).is_some();
     let active = app.session.active_component == id;
     let bodies = crate::context_menu::component_bodies(app, id);
     let visible = bodies.is_empty() || bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b));
@@ -654,7 +682,8 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
         return;
     }
     let d = depth + 1;
-    if id == 0 {
+    // A search lists only the matching bodies, sketches and construction items.
+    if id == 0 && searching(app).is_none() {
         doc_settings(app, ui, d);
         named_view_rows(app, ui, d, acts);
         origin_rows(app, ui, d);
@@ -665,7 +694,7 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
     for folder in ["bodies", "sketches", "construction"] {
         folder_rows(app, ui, id, folder, d, acts);
     }
-    if id == 0 {
+    if id == 0 && searching(app).is_none() {
         crate::dialogs_assembly::browser_joints(app, ui, d);
     }
     let children: Vec<u64> = app.session.doc.occurrences.iter().filter(|o| o.parent == id).map(|o| o.id).collect();
@@ -683,7 +712,7 @@ fn occurrence_key(path: &[u64]) -> String {
 fn occurrence_rows(app: &mut SolveApp, ui: &mut egui::Ui, path: Vec<u64>, depth: usize, acts: &mut Actions) {
     let Ok(placement) = app.session.occurrence_placement(&path) else { return };
     let key = occurrence_key(&path);
-    let open = is_open(app, &key, true);
+    let open = is_open(app, &key, true) || searching(app).is_some();
     let active = app.session.active_occurrence_path.as_deref() == Some(path.as_slice())
         || (app.session.active_occurrence_path.is_none()
             && app.session.active_component == placement.component
@@ -1412,6 +1441,9 @@ fn folder_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, comp: u64, path: Option
             }
         }
     }
+    if let Some(text) = searching(app) {
+        all.retain(|e| e.label.to_lowercase().contains(&text));
+    }
     if all.is_empty() {
         return;
     }
@@ -1427,7 +1459,7 @@ fn folder_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, comp: u64, path: Option
             app.tree.collapsed.remove(&format!("g{}", g.id));
         }
     }
-    let open = is_open(app, &key, true);
+    let open = is_open(app, &key, true) || searching(app).is_some();
     let any_visible = if folder == "sketches" { app.ui.show_sketches } else { all.iter().any(|e| e.visible) };
     let r = draw_row(
         ui,
@@ -1462,9 +1494,13 @@ fn folder_rows_at(app: &mut SolveApp, ui: &mut egui::Ui, comp: u64, path: Option
     }
     let (groups, loose) = arrange(app, comp, folder, all);
     let loose_keys: Vec<String> = loose.iter().map(|e| e.key.clone()).collect();
+    let search = searching(app).is_some();
     for (g, items) in &groups {
+        if search && items.is_empty() {
+            continue;
+        }
         let gkey = format!("{prefix}/g{}", g.id);
-        let gopen = is_open(app, &gkey, true);
+        let gopen = is_open(app, &gkey, true) || searching(app).is_some();
         let gvis = items.is_empty() || items.iter().any(|e| e.visible);
         let label = format!("{} ({})", g.name, items.len());
         let r = draw_row(
