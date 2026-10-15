@@ -32,6 +32,7 @@ pub mod dialogs_plastic;
 pub mod dialogs_save_mesh;
 pub mod dialogs_sheet;
 pub mod dialogs_surface;
+pub mod dialogs_sweep;
 pub mod dim_view;
 #[cfg(test)]
 mod dimension_create_ui_tests;
@@ -88,6 +89,8 @@ mod file_load;
 mod file_picker;
 pub use file_picker::FilePickerFuture;
 #[cfg(test)]
+mod blend_arrow_tests;
+#[cfg(test)]
 mod file_load_ui_tests;
 #[cfg(test)]
 mod fillet_spline_handle_tests;
@@ -141,6 +144,8 @@ pub mod smart_extrude;
 #[cfg(test)]
 mod smart_extrude_ui_tests;
 pub mod stand_up;
+#[cfg(test)]
+mod sweep_dialog_tests;
 pub mod theme;
 #[cfg(test)]
 mod thin_extrude_tests;
@@ -317,6 +322,9 @@ pub struct SolveApp {
     pub autosave_minutes: f64,
     /// The application bar is the window's title bar (Windows, Linux: no OS decorations).
     pub custom_titlebar: bool,
+    /// The OS hit test already offers the resize border ([`titlebar`]; the Windows desktop app),
+    /// so no egui resize zones are laid out.
+    pub native_resize_border: bool,
     /// macOS: the traffic lights sit over the application bar's left end.
     pub integrated_titlebar: bool,
     /// Build bodies' display meshes on the CPU even where the GPU could (safe mode). Read by
@@ -403,6 +411,7 @@ impl SolveApp {
             big_operation: false,
             autosave_minutes: 5.0,
             custom_titlebar: false,
+            native_resize_border: false,
             integrated_titlebar: false,
             cpu_meshing: false,
             frame_ms: 0.0,
@@ -668,6 +677,21 @@ impl SolveApp {
         self.home.open = false;
         if matches!(id, "sketch.insert_dxf" | "sketch.insert_svg") {
             self.pick_open_command(id, json!({}));
+            return;
+        }
+        if id == "component.insert_design" {
+            // Another design becomes a linked component; a STEP or mesh file picked here is
+            // inserted the way Insert STEP or Insert Mesh would (#1240).
+            self.pick_open(|app, path| {
+                let Some(path) = path else { return };
+                if is_design_path(&path) {
+                    if app.run("component.insert_design", json!({ "path": path })).is_ok() {
+                        app.fit_view();
+                    }
+                } else {
+                    app.insert_path_async(&path);
+                }
+            });
             return;
         }
         if matches!(id, "file.insert_step" | "file.insert_mesh") {
@@ -1209,6 +1233,11 @@ impl SolveApp {
         issue_report::CadInput::block(self, ui, &mut report_input);
         self.cad_ui(ui, &mut report_input);
         drop(report_input);
+        // After everything else, on every page (the start page too, which returns early from
+        // `cad_ui`): the window's edges resize it (#1381).
+        if self.custom_titlebar && !self.native_resize_border {
+            titlebar::resize_zones(ui);
+        }
         if self.file_picker.is_none() {
             issue_report::show(self, ui.ctx());
         }
@@ -1274,9 +1303,6 @@ impl SolveApp {
         prefs::show_reset_notice(self, ui.ctx());
         context_menu::show(self, ui.ctx());
         delete::show(self, ui.ctx());
-        if self.custom_titlebar {
-            titlebar::resize_zones(ui);
-        }
         shortcut_box::show(self, ui.ctx());
         prefs::show(self, ui.ctx());
         toolbar_custom::window(self, ui.ctx());
@@ -1408,3 +1434,10 @@ pub fn now_ms() -> f64 {
 
 #[cfg(test)]
 mod picker_test_support;
+
+/// A SolidCraft design file (`.solidcraft`, or a design saved as JSON), as opposed to a STEP or
+/// mesh file.
+fn is_design_path(path: &str) -> bool {
+    let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    matches!(ext.as_str(), "solidcraft" | "solvecraft" | "json")
+}

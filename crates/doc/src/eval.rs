@@ -1697,8 +1697,12 @@ fn region_samples(r: &Region2) -> Vec<Vec2> {
 /// Grow profile edges that lie on a face of a target body away from the profile, by a small
 /// amount, when the space they grow into is already material (join) or empty (cut). `probe`
 /// maps a sketch point to the world points where the tool would be (along the extrude, around
-/// the revolve). Only loops of straight edges are adjusted.
+/// the revolve). Loops of lines and arcs are adjusted: a line moves out, an arc keeps its centre
+/// and changes its radius (a rounded corner of a face cut whole, #1275). Arcs move only where
+/// both of their ends meet tangent neighbours that move with them; otherwise the loop is left
+/// as it is.
 fn grow_profile_for_coplanar(st: &ModelState, r: &Region2, op: Operation, targets: &[String], probe: &dyn Fn(Vec2) -> Vec<Vec3>) -> Region2 {
+    use solidcraft_geom::Seg2;
     if !matches!(op, Operation::Cut | Operation::Join) {
         return r.clone();
     }
@@ -1710,55 +1714,94 @@ fn grow_profile_for_coplanar(st: &ModelState, r: &Region2, op: Operation, target
     let size = bodies.iter().map(|b| b.body.size()).fold(0.0, f64::max);
     let delta = (size * 0.005).max(1e-3);
     let lp = r.outer.ccw();
-    let lines: Option<Vec<(Vec2, Vec2)>> =
-        lp.segs.iter().map(|s| if let solidcraft_geom::Seg2::Line { a, b } = *s { Some((a, b)) } else { None }).collect();
-    let Some(lines) = lines else { return r.clone() };
+    let segs = &lp.segs;
+    if segs.is_empty() || !segs.iter().all(|s| matches!(s, Seg2::Line { .. } | Seg2::Arc { .. })) {
+        return r.clone();
+    }
+    // The outward normal (away from the profile) at parameter `t` of a segment of the
+    // counterclockwise loop: the tangent turned clockwise.
+    let out_at = |s: &Seg2, t: f64| -> Option<Vec2> {
+        match *s {
+            Seg2::Line { a, b } => (b - a).normalized().map(|d| Vec2::new(d.y, -d.x)),
+            Seg2::Arc { start, sweep, .. } => Some(Vec2::from_angle(start + sweep * t) * sweep.signum()),
+            _ => None,
+        }
+    };
     let inside_any = |p: Vec3| meshes.iter().any(|m| m.contains(p));
-    let mut grow = vec![0.0; lines.len()];
+    let mut grow = vec![0.0; segs.len()];
     let mut any = false;
-    for (i, (a, b)) in lines.iter().enumerate() {
-        let Some(dir) = (*b - *a).normalized() else { continue };
-        let out = Vec2::new(dir.y, -dir.x);
+    for (i, seg) in segs.iter().enumerate() {
+        if let Seg2::Arc { radius, sweep, .. } = *seg
+            && sweep < 0.0
+            && radius <= 2.0 * delta
+        {
+            // A concave arc too small to shrink by the step.
+            continue;
+        }
         // Is the edge on a body face? Material on exactly one side of it.
-        let mids = [a.lerp(*b, 0.25), a.lerp(*b, 0.5), a.lerp(*b, 0.75)];
-        let side = |k: f64| mids.iter().flat_map(|m| probe(*m + out * (delta * k))).map(inside_any).collect::<Vec<bool>>();
+        let mids: Vec<(Vec2, Vec2)> = [0.25, 0.5, 0.75].iter().filter_map(|t| Some((seg.point_at(*t), out_at(seg, *t)?))).collect();
+        if mids.len() < 3 {
+            continue;
+        }
+        let side = |k: f64| mids.iter().flat_map(|(m, out)| probe(*m + *out * (delta * k))).map(inside_any).collect::<Vec<bool>>();
         let (outer, inner) = (side(0.5), side(-0.5));
         let want_outer = op == Operation::Join;
         let on_face = outer.iter().all(|x| *x == want_outer) && inner.iter().any(|x| *x != want_outer);
         let room = side(1.0).iter().all(|x| *x == want_outer);
-        if on_face && room {
-            if let Some(g) = grow.get_mut(i) {
-                *g = delta;
-            }
+        if on_face
+            && room
+            && let Some(g) = grow.get_mut(i)
+        {
+            *g = delta;
             any = true;
         }
     }
     if !any {
         return r.clone();
     }
-    // Offset the chosen lines and re-intersect neighbours.
-    let n = lines.len();
-    let shifted: Vec<(Vec2, Vec2)> = lines
-        .iter()
-        .zip(&grow)
-        .map(|((a, b), g)| {
-            let dir = (*b - *a).normalized().unwrap_or(Vec2::X);
-            let out = Vec2::new(dir.y, -dir.x);
-            (*a + out * *g, dir)
-        })
-        .collect();
-    let mut pts = Vec::with_capacity(n);
+    let n = segs.len();
+    let tangent = |a: &Seg2, b: &Seg2| a.end_tangent().cross(b.start_tangent()).abs() < 1e-6 && a.end_tangent().dot(b.start_tangent()) > 0.0;
+    // Where segment `i` starts once grown: the corner of it and the one before.
+    let mut starts = Vec::with_capacity(n);
     for i in 0..n {
-        let (Some(&(p0, d0)), Some(&(p1, d1))) = (shifted.get((i + n - 1) % n), shifted.get(i)) else { return r.clone() };
+        let (Some(prev), Some(cur), Some(&g0), Some(&g1)) = (segs.get((i + n - 1) % n), segs.get(i), grow.get((i + n - 1) % n), grow.get(i)) else {
+            return r.clone();
+        };
+        let corner = cur.start();
+        if g0 == 0.0 && g1 == 0.0 {
+            starts.push(corner);
+            continue;
+        }
+        if tangent(prev, cur) {
+            // Moved together, a tangent joint moves along the common normal and stays tangent.
+            if g0 != g1 {
+                return r.clone();
+            }
+            let Some(out) = out_at(cur, 0.0) else { return r.clone() };
+            starts.push(corner + out * g1);
+            continue;
+        }
+        let (Seg2::Line { a: a0, b: b0 }, Seg2::Line { a: a1, b: b1 }) = (*prev, *cur) else { return r.clone() };
+        let (Some(d0), Some(d1)) = ((b0 - a0).normalized(), (b1 - a1).normalized()) else { return r.clone() };
+        let (p0, p1) = (a0 + Vec2::new(d0.y, -d0.x) * g0, a1 + Vec2::new(d1.y, -d1.x) * g1);
         let den = d0.cross(d1);
         if den.abs() < 1e-12 {
-            pts.push(p1);
+            starts.push(p1);
             continue;
         }
         let t = (p1 - p0).cross(d1) / den;
-        pts.push(p0 + d0 * t);
+        starts.push(p0 + d0 * t);
     }
-    Region2 { outer: solidcraft_geom::Loop2::polygon(&pts), holes: r.holes.clone() }
+    let mut out = Vec::with_capacity(n);
+    for (i, seg) in segs.iter().enumerate() {
+        let (Some(&a), Some(&b), Some(&g)) = (starts.get(i), starts.get((i + 1) % n), grow.get(i)) else { return r.clone() };
+        out.push(match *seg {
+            Seg2::Line { .. } => Seg2::Line { a, b },
+            Seg2::Arc { center, radius, start, sweep } => Seg2::Arc { center, radius: radius + g * sweep.signum(), start, sweep },
+            _ => return r.clone(),
+        });
+    }
+    Region2 { outer: solidcraft_geom::Loop2 { segs: out }, holes: r.holes.clone() }
 }
 
 /// Booleans struggle with coincident faces (a cut starting on the face it cuts, a boss
@@ -2276,17 +2319,24 @@ fn hole_feature_tools(vals: &BTreeMap<String, Value>, st: &ModelState, f: &Featu
 /// counterbore) is machined like the equivalent extrude cut, so the sheet keeps it as a cut-out
 /// or pocket of its flat pattern (#560). Returns the sheet bodies it machined; none, with the
 /// model as it was, when a tool that meets a sheet can't be kept that way (the ordinary cut then
-/// refuses it).
-fn sheet_hole_cut(st: &mut ModelState, f: &Feature, tools: &[(Traced, Option<more::PrimitivePrism>)]) -> Result<Vec<String>> {
+/// refuses it). Pieces the hole parts from a sheet's base are named in `warning`.
+fn sheet_hole_cut(
+    st: &mut ModelState,
+    f: &Feature,
+    tools: &[(Traced, Option<more::PrimitivePrism>)],
+    warning: &mut Option<String>,
+) -> Result<Vec<String>> {
     if st.sheets.is_empty() {
         return Ok(Vec::new());
     }
     let saved = (st.sheets.clone(), st.bodies.clone());
     let mut handled: Vec<String> = Vec::new();
+    // Noted only when every tool was machined here.
+    let mut parted = None;
     for (tool, prism) in tools {
         let tool = &tool.body;
         let done = match prism {
-            Some(prism) => match more::sheet_primitive_cut(f, st, tool, *prism, Operation::Cut, true) {
+            Some(prism) => match more::sheet_primitive_cut(f, st, tool, *prism, Operation::Cut, true, &mut parted) {
                 Ok(done) => done,
                 // Drilled along a panel (into a rim) the hole is no flat cut-out: a bore of
                 // that panel, when it stays inside it.
@@ -2321,6 +2371,9 @@ fn sheet_hole_cut(st: &mut ModelState, f: &Feature, tools: &[(Traced, Option<mor
                 handled.push(name);
             }
         }
+    }
+    if let Some(note) = parted {
+        append_warning(warning, note);
     }
     Ok(handled)
 }
@@ -3043,7 +3096,8 @@ fn feature_tools_with_constructor(
             let roles = crate::lineage::SectionRoles { sections: sketches.into_iter().zip(secs.iter().map(|(_, lp)| lp)).collect() };
             Ok(vec![roles.tool(body)])
         }
-        FeatureKind::Sweep { sketch, profiles, path_sketch, path, .. } => {
+        FeatureKind::Sweep { sketch, profiles, path_sketch, path, orientation, twist, scale, .. } => {
+            let ctl = sweep_control(vals, orientation, twist, scale)?;
             let ss = st.sketch(*sketch).ok_or_else(|| DocError::Unknown(format!("sketch {sketch} (it must come earlier in the timeline)")))?;
             let ps =
                 st.sketch(*path_sketch).ok_or_else(|| DocError::Unknown(format!("sketch {path_sketch} (it must come earlier in the timeline)")))?;
@@ -3061,10 +3115,10 @@ fn feature_tools_with_constructor(
             let tool = |r: &Region2, body: Body| crate::lineage::ProfileRoles::swept(Some(ss), Some(r)).tool(body, None);
             // A path through 3D sketch curves follows them as points.
             if let Some(pts) = path_points(ps, path, start)? {
-                return regions.iter().map(|r| Ok(tool(r, kernel::sweep_path(&ss.plane, r, &pts)?))).collect();
+                return regions.iter().map(|r| Ok(tool(r, kernel::sweep_path_with(&ss.plane, r, &pts, &ctl)?))).collect();
             }
             let segs = path_segments(ps, path, start)?;
-            regions.iter().map(|r| Ok(tool(r, kernel::sweep(&ss.plane, r, &segs)?))).collect()
+            regions.iter().map(|r| Ok(tool(r, kernel::sweep_with(&ss.plane, r, &segs, &ctl)?))).collect()
         }
         FeatureKind::Pipe { path_sketch, path, diameter, wall, .. } => {
             let ps =
@@ -3112,6 +3166,32 @@ fn feature_tools_with_constructor(
 }
 
 /// A chain of sketch curves as 3D path segments, starting at the end nearest `start`.
+/// A sweep's options from its stored orientation and its twist and end scale expressions
+/// (none: no twist, scale 1). Out-of-range values are refused by the kernel.
+pub(crate) fn sweep_control(
+    vals: &BTreeMap<String, Value>,
+    orientation: &crate::SweepOrientation,
+    twist: &Option<String>,
+    scale: &Option<String>,
+) -> Result<kernel::SweepControl> {
+    let orientation = match *orientation {
+        crate::SweepOrientation::Perpendicular => kernel::SweepOrientation::Perpendicular,
+        crate::SweepOrientation::Parallel => kernel::SweepOrientation::Parallel,
+        crate::SweepOrientation::Direction(d) => kernel::SweepOrientation::Direction(d),
+    };
+    let twist = match twist {
+        Some(t) => val(vals, t, Kind::Angle)?,
+        None => 0.0,
+    };
+    let scale = match scale {
+        Some(k) => val(vals, k, Kind::Unitless)?,
+        None => 1.0,
+    };
+    let ctl = kernel::SweepControl { orientation, twist, scale };
+    ctl.check()?;
+    Ok(ctl)
+}
+
 /// A pipe's section: a circle of radius `r`, hollow when it has a wall.
 fn pipe_region(vals: &BTreeMap<String, Value>, r: f64, wall: &Option<String>) -> Result<Region2> {
     let holes = match wall {
@@ -4018,7 +4098,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             // Cuts through sheet metal become cut-outs of its flat pattern.
             if matches!(operation, Operation::Cut | Operation::Intersect) && matches!(f.kind, FeatureKind::Extrude { .. }) && !st.sheets.is_empty() {
                 let bodies: Vec<Body> = tools.iter().map(|t| t.body.clone()).collect();
-                let handled = more::sheet_cut(f, st, &bodies, targets, constructor.as_ref())?;
+                let handled = more::sheet_cut(f, st, &bodies, targets, constructor.as_ref(), warning)?;
                 if !handled.is_empty() {
                     return apply_beside_sheet_cut(st, f, tools, *operation, targets, &handled);
                 }
@@ -4028,7 +4108,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         FeatureKind::Hole { thread, diameter, .. } => {
             let (spots, dir) = hole_spots(st, f)?;
             let tools = hole_feature_tools(vals, st, f)?;
-            let handled = sheet_hole_cut(st, f, &tools)?;
+            let handled = sheet_hole_cut(st, f, &tools, warning)?;
             let tools: Vec<Traced> = tools.into_iter().map(|(tool, _)| tool).collect();
             if handled.is_empty() {
                 apply_traced(st, f, tools, Operation::Cut, &[])?;
@@ -4418,7 +4498,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let corner = point(vals, corner)?;
             let b = kernel::box_solid(corner, corner + s)?;
             let b = if matches!(operation, Operation::NewBody | Operation::Join) { b.with_box_certificate(f.id)? } else { b };
-            let handled = more::sheet_primitive_cut(f, st, &b, more::PrimitivePrism::Box { lo: corner, hi: corner + s }, *operation, false)?;
+            let handled = more::sheet_primitive_cut(f, st, &b, more::PrimitivePrism::Box { lo: corner, hi: corner + s }, *operation, false, warning)?;
             let tools = vec![crate::lineage::box_tool(b)];
             if !handled.is_empty() {
                 return apply_beside_sheet_cut(st, f, tools, *operation, &[], &handled);
@@ -4430,7 +4510,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let b = kernel::cylinder(base, *axis, radius, height)?;
             let b = if matches!(operation, Operation::NewBody | Operation::Join) { b.with_cylinder_certificate(f.id)? } else { b };
             let prism = more::PrimitivePrism::Cylinder { base, axis: *axis, radius, height };
-            let handled = more::sheet_primitive_cut(f, st, &b, prism, *operation, false)?;
+            let handled = more::sheet_primitive_cut(f, st, &b, prism, *operation, false, warning)?;
             let tools = vec![crate::lineage::cylinder_tool(b)];
             if !handled.is_empty() {
                 return apply_beside_sheet_cut(st, f, tools, *operation, &[], &handled);
