@@ -195,13 +195,40 @@
 //!   `{direction: [x, y, z]}`; absent: perpendicular), `twist` (an angle expression) and `scale`
 //!   (the end scale, an expression). A sweep without them saves as before; 0.11.x refuses
 //!   format 21, so no released build sweeps a twisted or scaled profile straight.
+//!   Nothing new is saved for converted sheets' corners and bend ends, but a design converts as
+//!   the rule says when it is evaluated: corners between the walls take the rule's corner relief
+//!   and a bend ending beside more of the fixed face its bend relief (0.11.0 left every corner a
+//!   notch and cut no bend relief), and a wall on part of an edge bends only where it stands
+//!   (0.11.0 refused it).
+//! - 22: an Import (STEP) feature can list `skip`: indices of the file's bodies it does not
+//!   build, because they are later instances of a part the file places more than once and the
+//!   other occurrences of that part's component show them (#1386: an imported file becomes a
+//!   component, an assembly in it nested components). Version 21 designs need no
+//!   transformation: an Import without it builds every body, as it always did, and designs
+//!   whose imports sit loose in a component are left as they are. The version stamp makes
+//!   0.12.0 (which reads up to 21) ask for an update instead of building those instances again
+//!   on top of their occurrences.
+//!   Also under 22, a number in an expression can be written with a decimal comma outside
+//!   parentheses (`2,5 mm` is `2.5 mm`, #1347; inside a function's parentheses the comma still
+//!   separates its arguments). Nothing new is saved, but an expression typed that way is saved as
+//!   typed; 0.12.0 asks for an update instead of failing to evaluate it.
+//!   Also under 22, a design can hold a `SurfaceBlend` (Blend Surface: `from`/`to` edge chains of
+//!   two bodies, optional `continuity`, `bulge`, `align`, `stitch`), and a `Patch` can carry a
+//!   `crown` (0 by default, and then not saved: a bump that vanishes on the loop, so the face
+//!   still meets the picked edges). Version 21 designs need no transformation; 0.12.0 asks for an
+//!   update instead of meeting a feature it can't read or dropping a patch's crown.
+//!   Also under 22, a sketch text's link source can say that its place, height or angle are
+//!   expressions (`exprs`: `x`, `y`, `height`, `angle`, each an expression over the design's
+//!   parameters); the source's `at`, `height` and `angle` then hold the numbers they last came
+//!   to. A text without `exprs` is set as it always was; 0.12.0 asks for an update instead of
+//!   dropping the expressions and keeping the text at its last numbers.
 
 use serde_json::Value;
 
 use crate::{DocError, Document, Result};
 
 /// The format this build writes.
-pub const FORMAT: u32 = 21;
+pub const FORMAT: u32 = 22;
 
 pub fn format_string(n: u32) -> String {
     format!("solidcraft/{n}")
@@ -218,7 +245,7 @@ pub fn version_of(s: &str) -> Option<u32> {
 
 /// JSON-level upgrades: entry `i` turns format `i + 1` into `i + 2`.
 type JsonStep = fn(&mut Value) -> Result<()>;
-const JSON_STEPS: [JsonStep; 20] = [
+const JSON_STEPS: [JsonStep; 21] = [
     |_| Ok(()),
     v2_to_v3,
     v3_to_v4,
@@ -232,6 +259,7 @@ const JSON_STEPS: [JsonStep; 20] = [
     |_| Ok(()),
     |_| Ok(()),
     v13_to_v14,
+    |_| Ok(()),
     |_| Ok(()),
     |_| Ok(()),
     |_| Ok(()),

@@ -31,7 +31,7 @@
 //! - `ui.confirm {accept?}`: the Delete confirmation (without `accept`: what it lists)
 //! - `ui.shortcut {command, key?, replace?}`: a command's key, or bind one ("" clears)
 //! - `ui.help {item?: about|shortcuts|report}`: the Help menu; returns the version and diagnostics
-//! - `ui.prefs {...}`: the preferences (default_units, nav, zoom_reverse, orbit_cursor, msaa,
+//! - `ui.prefs {...}`: the preferences (default_units, nav, zoom_reverse, orbit_around, msaa,
 //!   length_decimals, angle_decimals); returns them all
 //! - `ui.capture {action?: capture|revert|cancel}`: the Capture Position question
 //! - `ui.agent_cursor {show?, speed?: 1–5 (times) | "instant", follow_camera?}`: the agent cursor
@@ -172,6 +172,21 @@ pub fn request_scope(app: &SolveApp, params: &Value) -> Result<Option<vfs::PathS
     Ok(Some(vfs::PathScope::new(roots).with_design(app.session.path.as_deref())))
 }
 
+/// A model render of the view as the window shows it (theme, section, grid and axes), as PNG.
+pub fn view_png(app: &SolveApp, w: usize, h: usize) -> Option<Vec<u8>> {
+    let guides =
+        solidcraft_engine::view::Guides { grid: app.ui.show_grid && !crate::viewport::active_view(app).hide_grid, axes: app.origin_visible() };
+    let scene = solidcraft_engine::view::scene_with_palette_and_guides(
+        &app.session,
+        &app.cam,
+        crate::viewport::section_plane(app),
+        solidcraft_engine::view::world_curve_parts,
+        &crate::viewport::scene_palette(app.ui.dark, app.preferences.color_vision),
+        guides,
+    );
+    render_png(&scene, &app.cam, w, h)
+}
+
 pub fn handle(app: &mut SolveApp, ctx: &egui::Context, req: &ControlRequest) -> Outcome {
     let scope = match request_scope(app, &req.params) {
         Ok(Some(scope)) => scope,
@@ -245,6 +260,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             "file_picker_busy": app.file_picker_busy(),
             "file_dialog_open": app.file_picker_busy(),
             "build_ms": app.viewport.build_ms,
+            "display_lod": app.viewport.lod.lock().map(|l| serde_json::to_value(&l.stats).unwrap_or_default()).unwrap_or_default(),
             "preview": {"active": app.preview.active, "busy": app.preview.busy, "error": app.preview.error, "ms": app.preview.ms, "replaced": app.preview.replaced},
             "home": app.home.open,
             "recent_thumbnails_ready": app.home.ready_recents(),
@@ -640,6 +656,7 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             None => ok(json!({"question": app.tree.capture_prompt, "pending_moves": app.session.pending_moves.len()})),
         },
         "ui.prefs" => wrap(crate::prefs::control(app, p)),
+        "ui.agent_chat" => wrap(crate::agent_chat::control(app, ctx, p)),
         "ui.help" => match s("item") {
             Some(i @ ("about" | "shortcuts" | "report" | "crashes")) => {
                 crate::help::run(app, ctx, i);
