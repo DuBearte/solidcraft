@@ -200,11 +200,18 @@
 //!   and a bend ending beside more of the fixed face its bend relief (0.11.0 left every corner a
 //!   notch and cut no bend relief), and a wall on part of an edge bends only where it stands
 //!   (0.11.0 refused it).
-//! - 22: a number in an expression can be written with a decimal comma outside parentheses
-//!   (`2,5 mm` is `2.5 mm`, #1347; inside a function's parentheses the comma still separates its
-//!   arguments). Nothing new is saved and version 21 designs need no transformation, but an
-//!   expression typed that way is saved as typed; the version stamp makes 0.12.0 (which reads up
-//!   to 21) ask for an update instead of failing to evaluate it.
+//! - 22: an Import (STEP) feature can list `skip`: indices of the file's bodies it does not
+//!   build, because they are later instances of a part the file places more than once and the
+//!   other occurrences of that part's component show them (#1386: an imported file becomes a
+//!   component, an assembly in it nested components). Version 21 designs need no
+//!   transformation: an Import without it builds every body, as it always did, and designs
+//!   whose imports sit loose in a component are left as they are. The version stamp makes
+//!   0.12.0 (which reads up to 21) ask for an update instead of building those instances again
+//!   on top of their occurrences.
+//!   Also under 22, a number in an expression can be written with a decimal comma outside
+//!   parentheses (`2,5 mm` is `2.5 mm`, #1347; inside a function's parentheses the comma still
+//!   separates its arguments). Nothing new is saved, but an expression typed that way is saved as
+//!   typed; 0.12.0 asks for an update instead of failing to evaluate it.
 
 use serde_json::Value;
 
