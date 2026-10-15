@@ -20,6 +20,8 @@ use crate::viewport::{Proj, projected_polygon};
 pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
     let st = app.session.world_state();
     let first = d.inputs.first()?.items.first()?;
+    // An inside edge: its fillet or chamfer adds material in the corner (#1384).
+    let mut concave = false;
     let (at, normal) = match first {
         Sel::Profile { sketch, index } => {
             let ss = st.sketch(*sketch)?;
@@ -45,7 +47,11 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
             (plane.to_world(centre), Some(plane.normal()))
         }
         Sel::Face { body, index, point } => (*point, crate::dialogs::planar_face(&app.session, body, *index).map(|(_, n)| n)),
-        Sel::Edge { body, index, point } => (*point, st.body(body).and_then(|b| edge_bisector(&b.mesh(), *index, *point))),
+        Sel::Edge { body, index, point } => {
+            let mesh = st.body(body).map(|b| b.mesh());
+            concave = mesh.as_ref().is_some_and(|m| edge_is_concave(m, *index, *point));
+            (*point, mesh.and_then(|m| edge_bisector(&m, *index, *point)))
+        }
         Sel::Vertex { point, .. } => (*point, None),
         Sel::SketchCurve { id } => {
             let ss = st.sketches.iter().rev().find(|ss| ss.sketch.curve_index(id).is_some())?;
@@ -116,7 +122,10 @@ pub fn anchor(app: &SolveApp, d: &Dialog) -> Option<(Vec3, Option<Vec3>)> {
             (at, normal.or(dir.map(|d| -d)))
         }
         Kind::Section { .. } | Kind::OffsetPlane { .. } | Kind::OffsetFaces { .. } => (at, normal),
-        // Fillet radii, chamfer distances and shell thickness grow into the body.
+        // Fillet radii and chamfer distances grow into the body at an outside edge, and into the
+        // open corner, where the material goes, at an inside one (#1384).
+        Kind::Fillet { .. } if concave => (at, normal),
+        // Shell thickness grows into the body.
         Kind::Fillet { .. } | Kind::Shell { .. } => (at, normal.map(|n| -n)),
         Kind::Sheet(_) => (at, crate::dialogs_sheet::arrow(app, d).or(normal)),
         Kind::Plastic(_) => (at, normal),
@@ -180,6 +189,35 @@ fn reference_height(app: &SolveApp, d: &Dialog, label: &str, plane: &solidcraft_
 
 /// The outward direction between the two faces at an edge (a fillet's radius arrow points the
 /// other way, into the body).
+/// The triangles of each of the edge's two faces nearest `p`: (centre, unit normal) per face.
+fn edge_face_samples(m: &Mesh, index: usize, p: Vec3) -> Vec<(Vec3, Vec3)> {
+    let Some(faces) = m.edge_faces.get(index) else { return Vec::new() };
+    faces
+        .iter()
+        .filter_map(|f| {
+            m.triangles
+                .iter()
+                .zip(&m.tri_face)
+                .filter(|(_, tf)| *tf == f)
+                .filter_map(|(t, _)| m.tri(t))
+                .min_by(|a, b| ((a[0] + a[1] + a[2]) / 3.0).dist(p).total_cmp(&((b[0] + b[1] + b[2]) / 3.0).dist(p)))
+                .and_then(|[a, b, c]| Some(((a + b + c) / 3.0, (b - a).cross(c - a).normalized()?)))
+        })
+        .collect()
+}
+
+/// Whether the edge is an inside (concave) one at `p`: each face lies in front of the other's
+/// plane, where an outside edge's faces lie behind each other's.
+fn edge_is_concave(m: &Mesh, index: usize, p: Vec3) -> bool {
+    match edge_face_samples(m, index, p)[..] {
+        [(c1, n1), (c2, n2)] => {
+            let ahead = (c1 - p).dot(n2) + (c2 - p).dot(n1);
+            ahead > 1e-9 * (c1.dist(p) + c2.dist(p)).max(1e-9)
+        }
+        _ => false,
+    }
+}
+
 fn edge_bisector(m: &Mesh, index: usize, p: Vec3) -> Option<Vec3> {
     let faces = m.edge_faces.get(index)?;
     let mut sum = Vec3::ZERO;
@@ -1114,6 +1152,10 @@ fn arrow(painter: &egui::Painter, a: Pos2, b: Pos2, col: Color32) {
     let head = 11.0f32.min(l * 0.6);
     painter.add(egui::Shape::convex_polygon(vec![b, b - u * head + n * head * 0.45, b - u * head - n * head * 0.45], col, Stroke::NONE));
 }
+
+#[cfg(test)]
+#[path = "inside_edge_arrow_tests.rs"]
+mod inside_edge_arrow_tests;
 
 #[cfg(test)]
 mod tests {
