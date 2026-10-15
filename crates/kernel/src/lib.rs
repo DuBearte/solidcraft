@@ -49,9 +49,13 @@ mod issue_674_tests;
 #[cfg(test)]
 mod issue_679_tests;
 #[cfg(test)]
+mod issue_788_tests;
+#[cfg(test)]
 mod issue_851_tests;
 #[cfg(test)]
 mod issue_871_tests;
+#[cfg(test)]
+mod join_between_caps_tests;
 mod lip;
 mod loopblend;
 mod measure;
@@ -63,6 +67,9 @@ mod native;
 mod numbered;
 mod offset;
 mod ops;
+mod outline;
+#[cfg(test)]
+mod outline_tests;
 mod par;
 pub use par::{for_each_on_threads, map_on_threads};
 #[cfg(test)]
@@ -89,6 +96,7 @@ mod surface_kind;
 mod surface_offset;
 mod surfaces;
 mod sweep_path;
+mod tangent_cylinders;
 mod tess;
 #[cfg(test)]
 mod thread_tests;
