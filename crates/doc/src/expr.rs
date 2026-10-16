@@ -873,7 +873,8 @@ mod tests {
         assert_eq!(ev("1/2\"", Kind::Length).unwrap(), 12.7);
         assert_eq!(ev("width + 1\"", Kind::Length).unwrap(), 65.4);
         assert_eq!(ev("2' + 3\"", Kind::Length).unwrap(), 685.8);
-        assert!(ev("\"", Kind::Length).is_err());
+        // A mark alone is its unit alone, as `in` is.
+        assert_eq!(ev("\"", Kind::Length).ok(), ev("in", Kind::Length).ok());
     }
 
     #[test]
