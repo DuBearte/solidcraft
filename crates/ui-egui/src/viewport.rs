@@ -2257,6 +2257,22 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::frame_rate::paint(app, ui.ctx(), &painter, rect);
 
     // ---- interaction ----
+    // A two-point shape being dragged out (#1630) follows the pointer and ends where it is let go,
+    // even over the shape's own dimension box, which rides along beside the pointer.
+    if app.viewport.draw_drag {
+        let at = ui.input(|i| i.pointer.latest_pos()).filter(|p| rect.contains(*p));
+        if resp.drag_stopped() {
+            app.viewport.draw_drag = false;
+            if let Some(p) = at
+                && app.tool.as_ref().is_some_and(|t| t.pts.len() == 1)
+            {
+                crate::tools::on_hover(app, &proj, p);
+                crate::tools::on_click(app, &proj, p);
+            }
+        } else if let Some(p) = at {
+            crate::tools::on_hover(app, &proj, p);
+        }
+    }
     let add = mods.shift || mods.command || mods.ctrl;
     crate::sketch_text::set_one_letter(mods.shift);
     if let Some(p) = hover.filter(|_| inside) {
@@ -2275,12 +2291,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         {
             crate::tools::on_click(app, &proj, a);
             app.viewport.draw_drag = app.tool.as_ref().is_some_and(|t| t.pts.len() == 1);
-        }
-        if app.viewport.draw_drag && resp.drag_stopped() {
-            app.viewport.draw_drag = false;
-            if app.tool.as_ref().is_some_and(|t| t.pts.len() == 1) {
-                crate::tools::on_click(app, &proj, p);
-            }
         }
         if resp.clicked() && !held {
             if app.tool.is_some() {
