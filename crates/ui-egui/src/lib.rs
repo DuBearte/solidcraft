@@ -62,6 +62,7 @@ pub mod icons;
 pub mod inference;
 pub mod install;
 pub mod issue_report;
+pub mod joint_drag;
 pub mod keymap;
 mod material_card_review;
 #[cfg(test)]
@@ -147,6 +148,7 @@ pub mod sketch_modify_ui;
 #[cfg(test)]
 mod sketch_modify_ui_tests;
 pub mod sketch_palette;
+mod sketch_pattern_tree;
 pub(crate) mod sketch_text;
 mod sketch_text_handles;
 mod sketch_text_move;
@@ -632,7 +634,9 @@ impl SolveApp {
                 // reads the same way the toolbar button it came from does.
                 let language = i18n::Locale::for_language(&self.preferences.language);
                 let label = language.label(command_label(id));
-                if !(id == "view.navigate" && v.get("continuous").and_then(Value::as_bool) == Some(true)) {
+                // Frames of a gesture (a continuous view move, a part dragged by its joints) are
+                // not echoed one by one.
+                if v.get("continuous").and_then(Value::as_bool) != Some(true) {
                     self.session.echo(language.format("ui.command_done", &[("command", label)]));
                 }
                 if id == "file.new" {
