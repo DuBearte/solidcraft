@@ -1,0 +1,8 @@
+{"commands": [
+  {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20, "corner": [-20, -15, 0], "body_name": "Block"}},
+  {"command": "sketch.create", "params": {"plane": "XY"}},
+  {"command": "sketch.line", "params": {"points": [[-25, -20], [25, 20]], "ids": ["cut"]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.split_body", "params": {"body": "Block", "sketch": 2, "line": "cut"}},
+  {"command": "solid.move", "params": {"bodies": ["Block (1)"], "translate": [24, -30, 0]}}
+]}
