@@ -1,0 +1,7 @@
+{"commands": [
+  {"command": "parameters.add", "params": {"name": "width", "expression": "30 mm"}},
+  {"command": "parameters.add", "params": {"name": "t", "expression": "4 mm"}},
+  {"command": "solid.box", "params": {"length": 100, "width": "width", "height": "t", "body_name": "Plate"}},
+  {"command": "solid.hole", "params": {"position": ["40", "width/2", "t"], "clearance": "M5"}},
+  {"command": "parameters.change", "params": {"name": "width", "expression": "40 mm"}}
+]}
