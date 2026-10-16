@@ -222,17 +222,34 @@
 //!   parameters); the source's `at`, `height` and `angle` then hold the numbers they last came
 //!   to. A text without `exprs` is set as it always was; 0.12.0 asks for an update instead of
 //!   dropping the expressions and keeping the text at its last numbers.
-//!   Also under 22, a sketch line can be `infinite` (#1359): construction geometry through its
-//!   two points, drawn across the whole view, a boundary for trim and extend along its whole
-//!   line. Saved only when set; a line without it is the line it always was. 0.12.0 asks for an
-//!   update instead of drawing such a line between its two points.
+//! - 23: a motion link can carry a `coupling`: a gear pair (`ra`, `rb`, `internal`), a rack and
+//!   pinion (`radius`) or a screw (`pitch`), each size a number in mm, an expression or a picked
+//!   round face, and `reverse`. The link's `ratio` is worked out from it whenever the design
+//!   changes and saved as well, so a link reads the same without it. Version 22 designs need no
+//!   transformation: a link without `coupling` is a plain motion link, as it always was; 0.13.0
+//!   (which reads up to 22) asks for an update instead of keeping a gear's ratio when its radius
+//!   changes.
+//!   Also under 23, an Import's `file` can name a FreeCAD `.FCStd` or Rhino `.3dm` file (#1435,
+//!   read through cadmpeg); its `step` is still the STEP text the file was restated as, so the
+//!   feature's fields are unchanged and version 22 designs need no transformation; 0.13.x asks
+//!   for an update before it meets these imports.
+//! - 24: an Edge Flange feature can choose its own corner relief (`corner_relief_shape`: notch,
+//!   round, rectangular or tear, and `corner_relief`, the size across), for the corners its
+//!   flanges make. Version 23 designs need no transformation: a feature without them follows the
+//!   sheet metal rule, as it always did, and saves as before; 0.13.0 (which reads up to 22) asks
+//!   for an update instead of silently building the rule's relief where a design asks for another.
+//! - 25: a sketch line can be `infinite` (#1359): construction geometry through its two points,
+//!   drawn across the whole view, a boundary for trim and extend along its whole line. Saved only
+//!   when set: version 24 designs need no transformation, a line without it is the line it always
+//!   was; 0.13.0 (which reads up to 22) asks for an update instead of drawing such a line between
+//!   its two points.
 
 use serde_json::Value;
 
 use crate::{DocError, Document, Result};
 
 /// The format this build writes.
-pub const FORMAT: u32 = 22;
+pub const FORMAT: u32 = 25;
 
 pub fn format_string(n: u32) -> String {
     format!("solidcraft/{n}")
@@ -249,7 +266,7 @@ pub fn version_of(s: &str) -> Option<u32> {
 
 /// JSON-level upgrades: entry `i` turns format `i + 1` into `i + 2`.
 type JsonStep = fn(&mut Value) -> Result<()>;
-const JSON_STEPS: [JsonStep; 21] = [
+const JSON_STEPS: [JsonStep; 24] = [
     |_| Ok(()),
     v2_to_v3,
     v3_to_v4,
@@ -263,6 +280,9 @@ const JSON_STEPS: [JsonStep; 21] = [
     |_| Ok(()),
     |_| Ok(()),
     v13_to_v14,
+    |_| Ok(()),
+    |_| Ok(()),
+    |_| Ok(()),
     |_| Ok(()),
     |_| Ok(()),
     |_| Ok(()),
@@ -1002,6 +1022,80 @@ fn normalise(d: &mut Document) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 25 added infinite sketch lines: a no-op step carries a 24 design up, a finite line saves as
+    /// before, and an infinite one is saved under 25 and kept.
+    #[test]
+    fn version_twenty_four_designs_open_and_an_infinite_line_is_saved_in_twenty_five() {
+        use solidcraft_geom::Vec2;
+        assert_eq!(JSON_STEPS.len(), FORMAT as usize - 1, "one upgrade step for each format");
+        let design = |infinite: bool| {
+            let mut sketch = solidcraft_sketch::Sketch::new();
+            let line = sketch.add_line(Vec2::new(0.0, 0.0), Vec2::new(10.0, 5.0), None, None, Some("a")).unwrap();
+            if let Some(curve) = sketch.curves.get_mut(line) {
+                curve.infinite = infinite;
+                curve.construction = infinite;
+            }
+            let mut document = Document::new("A");
+            document.add_feature(crate::FeatureKind::Sketch { plane: crate::PlaneRef::Origin { name: "XY".into() }, sketch }, None).unwrap();
+            document
+        };
+        let saved = |document: &Document| -> Value { serde_json::from_str(&document.to_json()).unwrap() };
+        // A finite line saves no `infinite` key, and a design of format 24 opens as it was.
+        let plain = design(false);
+        let mut file = saved(&plain);
+        assert!(!file.to_string().contains("\"infinite\""), "{file}");
+        file["format"] = Value::from("solidcraft/24");
+        let opened = read(&file.to_string()).unwrap();
+        assert_eq!(opened.format, format_string(FORMAT));
+        assert_eq!(opened.features, plain.features);
+        // An infinite line says so in the file, which is stamped 25 and keeps it.
+        let own = design(true);
+        let file = saved(&own);
+        assert_eq!(file["features"][0]["sketch"]["curves"][0]["infinite"], Value::from(true));
+        // A build that reads up to 24 asks for an update on that stamp instead of drawing it finite.
+        assert_eq!(version_of(file["format"].as_str().unwrap_or_default()), Some(FORMAT));
+        assert_eq!(read(&file.to_string()).unwrap(), own);
+    }
+
+    /// 24 added the corner relief of an edge flange: a no-op step carries a 23 design up, a flange
+    /// without a relief of its own saves as before, and one with it is saved under 24 and kept.
+    #[test]
+    fn version_twenty_three_designs_open_and_an_edge_flange_relief_is_saved_in_twenty_four() {
+        assert_eq!(JSON_STEPS.len(), FORMAT as usize - 1, "one upgrade step for each format");
+        let flange = |shape: Option<&str>, size: Option<&str>| crate::FeatureKind::SheetFlange {
+            edges: vec![crate::FlangeEdge::at(solidcraft_geom::Vec3::ZERO)],
+            height: "10 mm".into(),
+            angle: "90 deg".into(),
+            radius: None,
+            position: "inside".into(),
+            flip: false,
+            body: None,
+            corner_relief_shape: shape.map(Into::into),
+            corner_relief: size.map(Into::into),
+        };
+        let saved = |document: &Document| -> Value { serde_json::from_str(&document.to_json()).unwrap() };
+        // A flange that follows the rule saves neither key, and a design of format 23 opens as it was.
+        let mut plain = Document::new("A");
+        plain.add_feature(flange(None, None), None).unwrap();
+        let mut file = saved(&plain);
+        let feature = file["features"].as_array().and_then(|f| f.last()).cloned().unwrap();
+        assert_eq!(feature["type"], "sheet_flange");
+        assert!(feature.get("corner_relief_shape").is_none() && feature.get("corner_relief").is_none(), "{feature}");
+        file["format"] = Value::from("solidcraft/23");
+        let opened = read(&file.to_string()).unwrap();
+        assert_eq!(opened.format, format_string(FORMAT));
+        assert_eq!(opened.features, plain.features);
+        // One that chooses its relief says so in the file, which is stamped 24 and keeps it.
+        let mut own = Document::new("A");
+        own.add_feature(flange(Some("round"), Some("6 mm")), None).unwrap();
+        let file = saved(&own);
+        let feature = file["features"].as_array().and_then(|f| f.last()).cloned().unwrap();
+        assert_eq!((&feature["corner_relief_shape"], &feature["corner_relief"]), (&Value::from("round"), &Value::from("6 mm")));
+        // A build that reads up to 23 asks for an update on that stamp instead of dropping the relief.
+        assert_eq!(version_of(file["format"].as_str().unwrap_or_default()), Some(FORMAT));
+        assert_eq!(read(&file.to_string()).unwrap(), own);
+    }
 
     #[test]
     fn version_thirteen_names_keep_their_meaning_under_the_legacy_mark() {
