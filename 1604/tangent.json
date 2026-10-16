@@ -1,0 +1,10 @@
+{"commands": [
+  {"command": "sketch.create", "params": {"plane": "XY"}},
+  {"command": "sketch.circle.center", "params": {"center": [0, 0], "radius": 10}},
+  {"command": "sketch.line", "params": {"points": [[0, 0], [10, 0]], "ids": ["guide_a"]}},
+  {"command": "sketch.line", "params": {"points": [[0, 0], [0, 10]], "ids": ["guide_b"]}},
+  {"command": "sketch.construction", "params": {"curves": ["guide_a", "guide_b"]}},
+  {"command": "sketch.trim", "params": {"curve": "c1", "at": [7.07, 7.07]}},
+  {"command": "sketch.arc.tangent", "params": {"start": "guide_a.end", "end": [14, 6]}},
+  {"command": "sketch.finish", "params": {}}
+]}
