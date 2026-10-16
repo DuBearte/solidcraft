@@ -971,7 +971,11 @@ fn bounded_surface_division<S: PreMeshableSurface>(surface: &S, (ur, vr): ((f64,
                 let pt10 = surface.subs(u[1], v[0]).to_vec();
                 let pt11 = surface.subs(u[1], v[1]).to_vec();
                 let pt = Point3::from_vec(pt00 * (1.0 - p) * (1.0 - q) + pt01 * (1.0 - p) * q + pt10 * p * (1.0 - q) + pt11 * p * q);
-                let far = p0.distance2(pt) > tol * tol;
+                // SolidCraft (#1666): a cell is drawn as two triangles, not as the bilinear blend
+                // of its corners. A twisted cell (a bilinear patch is the blend exactly, so `pt`
+                // never tells) leaves the triangles up to a quarter of its twist away at the middle.
+                let twist = (pt00 - pt01 - pt10 + pt11) * 0.25;
+                let far = p0.distance2(pt) > tol * tol || twist.magnitude2() > tol * tol;
                 // Which direction bends: refine only that one (a cylinder needs no division
                 // along its rulings).
                 let (su, sv) = ([surface.subs(u[0], v0), surface.subs(u[1], v0)], [surface.subs(u0, v[0]), surface.subs(u0, v[1])]);
