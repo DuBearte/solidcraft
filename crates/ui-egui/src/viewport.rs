@@ -7,7 +7,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::geom::{Vec2, Vec3};
 use solidcraft_engine::render::{Camera, Mat4, Rgb};
 use solidcraft_engine::sketch::CurveKind;
-use solidcraft_engine::view::{colors, grid_step, sketch_lines_with_sampler};
+use solidcraft_engine::view::{colors, grid_plane, grid_step, sketch_lines_with_sampler};
 use std::hash::{Hash, Hasher};
 
 use crate::gpu::{Frame, GpuScene, GpuTarget, SceneSlot, ViewportCallback};
@@ -682,22 +682,6 @@ fn build_scene(app: &SolveApp) -> GpuScene {
     }
 
     sc
-}
-
-/// The two axes (in the camera's Z-up frame) of the plane the grid lies in, for a view whose
-/// direction toward the eye is `back` (in that frame). The ground (frame XY) unless it is seen
-/// nearly edge-on, as in the Front or Right view; then the upright origin plane that faces the
-/// view more, so the grid stays visible (#1470).
-fn grid_plane(back: Vec3) -> (Vec3, Vec3) {
-    // About 11.5° above or below the ground.
-    const EDGE_ON: f64 = 0.2;
-    if back.z.abs() >= EDGE_ON || !back.z.is_finite() {
-        (Vec3::X, Vec3::Y)
-    } else if back.y.abs() >= back.x.abs() {
-        (Vec3::X, Vec3::Z)
-    } else {
-        (Vec3::Y, Vec3::Z)
-    }
 }
 
 /// A soft dark ellipse on the ground under the shown bodies (darkest in the middle).
