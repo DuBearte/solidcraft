@@ -1,0 +1,7 @@
+{"commands": [
+  {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}},
+  {"command": "sketch.create", "params": {"plane": {"face": [20, 15, 20]}}},
+  {"command": "sketch.circle.center", "params": {"center": [20, 15], "radius": 6}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "solid.extrude", "params": {"profiles": [{"point": [20, 15]}], "to": [5, 5, 0], "distance": 19, "direction": "positive", "operation": "auto"}}
+]}
