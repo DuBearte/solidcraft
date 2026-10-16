@@ -8,7 +8,7 @@
   {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 4], "value": null}}},
   {"key": "Escape"},
   {"start": "sketch.circle.center"},
-  {"drag": [{"sketch": [70, 10]}, {"sketch": [80, 10]}], "steps": 8},
+  {"drag": [{"sketch": [-30, 10]}, {"sketch": [-20, 10]}], "steps": 8},
   {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 4, "construction"], "value": false}}},
   {"expect": {"query": {"command": "sketch.inspect", "path": ["curves", 5], "value": null}}}
 ]
