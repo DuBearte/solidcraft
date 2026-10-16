@@ -317,15 +317,15 @@ fn offset_chain_mirror_patterns_move_scale() {
 fn a_tangent_arc_starts_from_a_trimmed_end() {
     let mut s = new_sketch();
     let c = ids(&run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}))["curves"])[0].clone();
-    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "ids": ["k1"]}));
-    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 10]], "ids": ["k2"]}));
-    run(&mut s, "sketch.construction", json!({"curves": ["k1", "k2"]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [10, 0]], "ids": ["guide_a"]}));
+    run(&mut s, "sketch.line", json!({"points": [[0, 0], [0, 10]], "ids": ["guide_b"]}));
+    run(&mut s, "sketch.construction", json!({"curves": ["guide_a", "guide_b"]}));
     run(&mut s, "sketch.trim", json!({"curve": c, "at": [7.07, 7.07]}));
     let sk = sketch(&s);
-    let picked = sk.resolve_point("k1.end").unwrap();
+    let picked = sk.resolve_point("guide_a.end").unwrap();
     assert!(sk.point(picked).unwrap().dist(Vec2::new(10.0, 0.0)) < 1e-6);
     let trimmed = sk.curves.iter().position(|cu| !cu.construction && matches!(cu.kind, CurveKind::Arc { .. })).expect("the trimmed arc");
-    let r = run(&mut s, "sketch.arc.tangent", json!({"start": "k1.end", "end": [14, 6]}));
+    let r = run(&mut s, "sketch.arc.tangent", json!({"start": "guide_a.end", "end": [14, 6]}));
     let sk = sketch(&s);
     let a = sk.curve_index(&ids(&r["curves"])[0]).unwrap();
     let a_ends: Vec<usize> = sk.curves[a].kind.point_ids();
