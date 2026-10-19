@@ -2317,3 +2317,28 @@ fn combine_takes_bodies_clicked_in_the_browser_in(layout: &str, control: bool) {
     assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Block".into() }], "{layout} control={control} target: {:?}", d.inputs);
     assert_eq!(d.inputs[1].items, vec![Sel::Body { name: "Cutter".into() }], "{layout} control={control} tools: {:?}", d.inputs);
 }
+
+/// #2984: a sketch selected in the Browser is the one Extrude takes, not the last sketch made.
+#[test]
+fn extrude_takes_the_sketch_selected_in_the_browser() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[40, 0], [50, 0], [45, 8], [40, 0]]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    let sketches: Vec<u64> =
+        h.app.session.doc.features.iter().filter(|f| matches!(f.kind, solidcraft_engine::doc::FeatureKind::Sketch { .. })).map(|f| f.id).collect();
+    let (rect, tri) = (sketches[0], sketches[1]);
+    h.app.session.selection = vec![Sel::Feature { id: rect }];
+    h.app.start("solid.extrude");
+    h.frames(1);
+    let items = h.app.dialog.as_ref().unwrap().inputs[0].items.clone();
+    assert_eq!(items, vec![Sel::Profile { sketch: rect, index: 0 }], "the selected sketch, not {tri}");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
+    let m = h.app.session.execute("inspect.measure", &json!({})).unwrap();
+    let volume = m["bodies"][0]["volume_mm3"].as_f64().unwrap();
+    assert!((volume - 20.0 * 10.0 * 10.0).abs() < 1e-6, "the 20 × 10 rectangle, 10 mm: {volume}");
+}
