@@ -2251,3 +2251,23 @@ fn hovering_a_large_body_does_not_wait_for_its_pick_index() {
     assert!(matches!(h.app.viewport.hover, Some(crate::viewport::Hit::Face { .. })), "{:?}", h.app.viewport.hover);
     assert!(hover_ms < index_ms / 3.0, "the first hover took {hover_ms:.1} ms; making the index takes {index_ms:.1} ms");
 }
+
+/// #4452: with Combine open, bodies clicked in the Browser fill its inputs, as clicks on them
+/// in the view do: the first is the target, the next the tools. Overlapping bodies are often
+/// only told apart in the Browser.
+#[test]
+fn combine_takes_bodies_clicked_in_the_browser() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("solid.box", json!({"corner": [0, 0, 0], "length": 20, "width": 20, "height": 20, "body_name": "Block"})).unwrap();
+    h.app.run("solid.box", json!({"corner": [10, 10, 10], "length": 20, "width": 20, "height": 20, "body_name": "Cutter"})).unwrap();
+    h.app.session.selection.clear();
+    h.app.start("solid.combine");
+    h.frames(2);
+    h.step(&json!({"click": {"browser": "Block"}})).unwrap();
+    h.frames(1);
+    h.step(&json!({"click": {"browser": "Cutter"}})).unwrap();
+    h.frames(1);
+    let d = h.app.dialog.as_ref().expect("Combine stays open");
+    assert_eq!(d.inputs[0].items, vec![Sel::Body { name: "Block".into() }], "target: {:?}", d.inputs);
+    assert_eq!(d.inputs[1].items, vec![Sel::Body { name: "Cutter".into() }], "tools: {:?}", d.inputs);
+}
