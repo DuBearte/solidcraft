@@ -8,7 +8,8 @@
 //! step is refused (a step makes a new parameter, which `changes` can't; an expression is
 //! wrong), the runner runs the run's steps one by one as before, so a refused edit is still
 //! named by its own step. Any other step (a sketch, an extrude, a rename) ends a run, so it sees
-//! the design up to date.
+//! the design up to date. A run skips the states between its edits: an edit refused on its own
+//! can go through together with the run's later edits.
 
 use serde_json::{Map, Value, json};
 

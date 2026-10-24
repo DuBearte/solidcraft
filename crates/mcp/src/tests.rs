@@ -525,6 +525,17 @@ fn batch_coalesces_parameter_edits() {
     let pins: f64 = (0..5).map(|i| std::f64::consts::PI * 9.0 * (10.0 + f64::from(i))).sum();
     let v = tool(&mut s, "measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
     assert!((v - (100.0 * 100.0 * 5.0 + pins)).abs() < 1e-3 * v, "{v}");
+    // The same edits step by step on a second design end in the same design and values.
+    let mut t = server();
+    tool(&mut t, "batch", json!({"commands": build}));
+    let one_by_one = tool(&mut t, "batch", json!({"commands": edits}));
+    for (a, b) in results.iter().zip(one_by_one["results"].as_array().unwrap()) {
+        assert_eq!((&a["name"], &a["value"]), (&b["name"], &b["value"]), "{a} vs {b}");
+    }
+    let w = tool(&mut t, "measure", json!({}))["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((v - w).abs() < 1e-9 * w, "coalesced {v}, step by step {w}");
+    let list = |s: &mut Server| tool(s, "execute", json!({"command": "parameters.list", "params": {"filter": "user"}}));
+    assert_eq!(list(&mut s), list(&mut t));
     // A new parameter in the run: the run goes step by step and still sets everything.
     let r = tool(
         &mut s,
