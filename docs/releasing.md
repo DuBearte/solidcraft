@@ -215,7 +215,10 @@ connect with `sudo snap connect solidcraft:removable-media` (getting-started.md)
 
 SolidCraft is not in [winget-pkgs](https://github.com/microsoft/winget-pkgs) yet: its first
 version, as `bherbruck.SolidCraft`, has to be submitted and merged there once (by hand, with
-Komac or `wingetcreate`) before `winget install bherbruck.SolidCraft` finds it. Until then the
+Komac or `wingetcreate`) before `winget install bherbruck.SolidCraft` finds it. A first
+submission, for 0.21.0, is already open as
+[microsoft/winget-pkgs#452486](https://github.com/microsoft/winget-pkgs/pull/452486) (flagged
+`Validation-Executable-Error`): take that one up rather than opening another. Until then the
 README and [downloads](downloads.md) don't offer the command (#5734); add it back when the
 package is listed. After that first version, publishing a non-prerelease
 GitHub release runs `winget.yml`, which uses [Komac](https://github.com/russellbanks/Komac)
