@@ -419,7 +419,15 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         // A newer release: its Update button stays before the right cluster, in the space up to
         // the bar's own file actions on the left.
-        let controls_left = if app.native_file_menu { r.right() - captions - 12.0 } else { report.left() - CLUSTER_BUTTONS };
+        // The native menus take Settings, Help and Report a bug, but not the Assistant button: it
+        // isn't a menu, and it shows the agent's state (#6118). It keeps the bar's right end.
+        let native_assistant = app.native_file_menu && crate::agent_chat::app_bar_button_shown(app);
+        let native_right = r.right() - captions - 12.0;
+        let controls_left = match (app.native_file_menu, native_assistant) {
+            (true, true) => native_right - 34.0,
+            (true, false) => native_right,
+            _ => report.left() - CLUSTER_BUTTONS,
+        };
         let span = Rect::from_min_max(pos2(x, report.top()), pos2(controls_left - 2.0, report.bottom()));
         let update_labeled = report_label;
         let update = crate::update::button(app, ui, span, update_labeled);
@@ -483,6 +491,9 @@ pub fn app_bar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     t.app_bar_text,
                 );
             }
+        }
+        if native_assistant {
+            assistant_button(app, ui, Rect::from_center_size(pos2(native_right - 16.0, r.center().y), vec2(32.0, 32.0)));
         }
         if app.custom_titlebar {
             crate::titlebar::caption_buttons(app, ui, r);
@@ -2079,6 +2090,15 @@ mod header_report_tests {
         h.app.native_file_menu = true;
         h.frames(3);
         assert!(crate::scenario::handle_at("appbar:file").is_none());
+        // The Assistant button isn't a menu: it stays, at the bar's right end (#6118).
+        let assistant = crate::scenario::handle_at("titlebar:assistant").expect("the Assistant button stays");
+        assert!(crate::scenario::handle_at("titlebar:preferences").is_none(), "Settings is in the native menu");
+        let tabs_end = crate::scenario::handle_at("appbar:save").map_or(0.0, |p| p.x);
+        assert!(assistant.x > tabs_end, "right of the bar's own buttons");
+        h.app.preferences.ai_toolbar_button = false;
+        h.frames(3);
+        assert!(crate::scenario::handle_at("titlebar:assistant").is_none(), "its preference still hides it");
+        h.app.preferences.ai_toolbar_button = true;
         assert!(!h.ctx.data(|data| data.get_temp::<bool>(egui::Id::new("sc_file_menu")).unwrap_or(false)));
         assert!(crate::scenario::handle_at("appbar:save").is_some());
         assert!(crate::scenario::handle_at("appbar:undo").is_none());
