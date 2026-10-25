@@ -519,7 +519,7 @@ fn move_many(s: &mut Session, p: &Value) -> Result<Value> {
     let slot = num(p, "position").map(|x| x.max(0.0) as usize).ok_or_else(|| bad(cmd, "`position` must be a number"))?;
     let active = active_param(p, cmd)?;
     let (mut next, ordered, _, checked) = reorder_features(s, next, &moving, slot, false, cmd)?;
-    let marker = next.marker.clone();
+    let marker = next.marker;
     place_marker(s, &mut next, &moving, active, cmd)?;
     let checked = checked.filter(|_| next.marker == marker);
     if next != *s.doc {
@@ -1180,7 +1180,7 @@ fn reorder(s: &mut Session, p: &Value) -> Result<Value> {
         let list: Vec<String> = broken.iter().map(|(n, e)| format!("{n} ({e})")).collect();
         return Err(bad(cmd, format!("moving {name} there breaks {}", list.join("; "))));
     }
-    let marker = next.marker.clone();
+    let marker = next.marker;
     place_marker(s, &mut next, &[id], active, cmd)?;
     if next != *s.doc {
         // The check evaluated the new order: keep its results, so setting the design doesn't
@@ -1245,7 +1245,7 @@ fn reorder_many(s: &mut Session, p: &Value) -> Result<Value> {
     let active = active_param(p, cmd)?;
     let allow = allow_errors(p, cmd)?;
     let (mut next, ordered, broken, checked) = reorder_features(s, (*s.doc).clone(), &ids, slot, allow, cmd)?;
-    let marker = next.marker.clone();
+    let marker = next.marker;
     place_marker(s, &mut next, &ordered, active, cmd)?;
     // The checked results stand only when placing the marker left the design as they were made for.
     let checked = checked.filter(|_| next.marker == marker);
