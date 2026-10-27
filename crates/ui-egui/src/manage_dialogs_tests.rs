@@ -132,6 +132,35 @@ fn form(command: &str, labels: &[&str]) {
     }
 }
 
+/// #7433: Physical Material opened on the list's own first choice (Steel), so a body made Copper
+/// looked like Steel when the dialog was opened again, and OK would have made it Steel. It opens
+/// on the picked bodies' material; with none assigned, or bodies of different materials, the
+/// list's choice stays.
+#[test]
+fn physical_material_opens_on_the_bodies_material() {
+    let material = |h: &Harness| dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1["material"].clone();
+    let mut h = fixture();
+    h.app.start("material.assign");
+    h.frames(2);
+    let default = material(&h);
+    assert_ne!(default, json!("Copper"));
+    h.app.dialog = None;
+    assert!(h.app.session.doc.material_names().iter().any(|n| n == "Copper"));
+    h.app.run("material.assign", json!({"bodies":["Body1"],"material":"Copper"})).unwrap();
+    h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+    h.app.start("material.assign");
+    h.frames(2);
+    assert_eq!(material(&h), json!("Copper"), "opens on the body's material");
+    h.app.dialog = None;
+    h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"corner":[20,0,0],"operation":"new"})).unwrap();
+    let other = h.app.session.doc.materials.keys().all(|b| b != "Body2");
+    assert!(other, "the second body has no material of its own");
+    h.app.session.selection = vec![Sel::Body { name: "Body1".into() }, Sel::Body { name: "Body2".into() }];
+    h.app.start("material.assign");
+    h.frames(2);
+    assert_eq!(material(&h), default, "bodies of different materials: the list's own choice");
+}
+
 #[test]
 fn physical_material_is_dense_and_keeps_assignment() {
     form("material.assign", &["Bodies", "Material"]);

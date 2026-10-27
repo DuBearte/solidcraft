@@ -1037,6 +1037,20 @@ impl Dialog {
                 _ => None,
             });
         }
+        // Physical Material opens on the material the picked bodies have (#7433): the list's own
+        // first choice looked like the bodies' material. Bodies of different materials, or none
+        // assigned, leave it as it was.
+        if let Kind::Material { index, .. } = &mut d.kind {
+            let bodies: Vec<&str> =
+                d.inputs.iter().flat_map(|i| &i.items).filter_map(|x| if let Sel::Body { name } = x { Some(name.as_str()) } else { None }).collect();
+            let mut assigned = bodies.iter().map(|b| s.doc.materials.get(*b));
+            if let Some(Some(first)) = assigned.next()
+                && assigned.all(|m| m == Some(first))
+                && let Some(at) = s.doc.material_names().iter().position(|n| n == first)
+            {
+                *index = at;
+            }
+        }
         // With nothing pre-selected, a single profile in the sketch being used is taken (#684:
         // not one a feature already builds from).
         if matches!(d.kind, Kind::Extrude { .. } | Kind::Revolve { .. })
