@@ -10,5 +10,17 @@
   "zh": {
     "Read-only list: shortcuts can't be changed here.": "只读列表：此处无法更改快捷键。",
     "Edit shortcuts": "编辑快捷键"
+  },
+  "ar": {
+    "Read-only list: shortcuts can't be changed here.": "قائمة للقراءة فقط: لا يمكن تغيير الاختصارات هنا.",
+    "Edit shortcuts": "تعديل الاختصارات"
+  },
+  "he": {
+    "Read-only list: shortcuts can't be changed here.": "רשימה לקריאה בלבד: לא ניתן לשנות כאן קיצורי דרך.",
+    "Edit shortcuts": "עריכת קיצורי דרך"
+  },
+  "vi": {
+    "Read-only list: shortcuts can't be changed here.": "Danh sách chỉ đọc: không thể thay đổi phím tắt ở đây.",
+    "Edit shortcuts": "Sửa phím tắt"
   }
 }
